@@ -1,0 +1,122 @@
+name: CI
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -Dwarnings
+  RUSTDOCFLAGS: -Dwarnings
+  RUST_BACKTRACE: 1
+  MSRV: 1.85.0
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show active-toolchain -v
+      - run: cargo build --all-targets --all-features
+
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install ${{ env.MSRV }} --profile minimal
+      - run: rustup override set ${{ env.MSRV }}
+      - run: rustup show active-toolchain -v
+      - run: |
+          cargo build
+          cargo build --lib --all-features
+        env:
+          RUSTFLAGS: "" # remove -Dwarnings
+
+  rustfmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install nightly --profile minimal --component rustfmt
+      - run: rustup override set nightly
+      - run: rustup show active-toolchain -v
+      - run: cargo fmt --version
+      - run: cargo fmt -- --check
+
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show active-toolchain -v
+      - run: rustup component add clippy
+      - run: cargo clippy --version
+      - run: cargo clippy --all-targets --all-features
+      - run: RUSTFLAGS="$RUSTFLAGS --cfg harvest_cell_loom" cargo clippy --lib --test loom --all-features
+
+  test:
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - name: seqcst
+            features: tokio
+          - name: fence_fallback
+            features: fence_fallback,tokio
+          - name: membarrier
+            features: membarrier,tokio
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install nightly --profile minimal --component llvm-tools-preview
+      - run: rustup override set nightly
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - run: rustup show active-toolchain -v
+      - run: cargo llvm-cov test --doctests --features "${{ matrix.features }}" --codecov --output-path codecov.json
+      - uses: codecov/codecov-action@v5
+        with:
+          flags: regular,${{ matrix.name }}
+          files: codecov.json
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: true
+
+  loom:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - run: rustup show active-toolchain -v
+      - run: RUSTFLAGS="$RUSTFLAGS --cfg harvest_cell_loom -C debug-assertions" cargo llvm-cov test --release --features loom,fence_fallback --test loom --codecov --output-path codecov.json
+      - uses: codecov/codecov-action@v5
+        with:
+          flags: loom
+          files: codecov.json
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: true
+
+  miri:
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        features: ["tokio", "fence_fallback,tokio"]
+    env:
+      MIRIFLAGS: -Zmiri-strict-provenance
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install nightly --component miri
+      - run: rustup override set nightly
+      - run: rustup show active-toolchain -v
+      - run: cargo miri setup
+      - run: cargo miri test --features "${{ matrix.features }}"
+
+  docs:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install nightly
+      - run: rustup override set nightly
+      - run: rustup show active-toolchain -v
+      - run: cargo doc --no-deps --all-features

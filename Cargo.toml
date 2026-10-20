@@ -1,0 +1,71 @@
+[package]
+name = "harvest-cell"
+version = "0.1.0"
+edition = "2024"
+authors = ["sargarass <sargarass@nuahuli.net>"]
+readme = "README.md"
+license = "MIT"
+keywords = ["double-buffer", "spsc", "concurrency", "synchronization", "memory-barrier"]
+categories = ["data-structures", "concurrency"]
+description = "Collect accumulated data across threads without blocking writers"
+documentation = "https://docs.rs/harvest-cell/"
+repository = "https://github.com/elfo-rs/harvest-cell"
+rust-version = "1.85.0"
+
+[package.metadata.docs.rs]
+features = ["tokio"]
+
+[lints.rust]
+rust_2018_idioms = { level = "warn", priority = -1 }
+unreachable_pub = "warn"
+missing_debug_implementations = "warn"
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(harvest_cell_loom)'] }
+
+[lints.clippy]
+undocumented_unsafe_blocks = "warn"
+
+pedantic = { level = "warn", priority = -1 }
+inline_always = "allow"
+
+[features]
+default = []
+fence_fallback = []
+membarrier = ["fence_fallback", "dep:libc"]
+tokio = ["dep:tokio"]
+# Model checking requires both this feature and --cfg harvest_cell_loom.
+loom = ["dep:loom"]
+
+[dependencies]
+sealed = "0.7"
+tokio = { version = "1.38", optional = true, features = ["rt", "time"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = { version = "0.2", optional = true }
+
+[target.'cfg(harvest_cell_loom)'.dependencies]
+loom = { version = "0.7", optional = true }
+
+[dev-dependencies]
+crossbeam-utils = "0.8"
+criterion = "0.8"
+parking_lot = "0.12"
+static_assertions = "1.1"
+thread_local = "1.1"
+tokio = { version = "1.38", features = ["macros", "sync"] }
+
+[profile.release]
+debug = 1
+
+[[test]]
+name = "loom"
+# Loom supports SeqCst fences, but not SeqCst loads and stores.
+# See https://github.com/tokio-rs/loom/issues/180.
+required-features = ["loom", "fence_fallback"]
+
+[[example]]
+name = "telemetry"
+test = true
+
+[[bench]]
+name = "write"
+harness = false
